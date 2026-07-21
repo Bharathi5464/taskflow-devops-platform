@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+
+# VS Code
+.vscode/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment files
+.env
+
+# Pytest cache (if you add tests later)
+.pytest_cache/
+
+# macOS (optional)
+.DS_Store
