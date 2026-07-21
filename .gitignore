@@ -1,6 +1,7 @@
 # Python bytecode
 __pycache__/
 *.py[cod]
+12app.py
 
 # Virtual environments
 venv/
