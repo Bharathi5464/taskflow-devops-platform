@@ -11,7 +11,8 @@ def home():
     return {
         "application": "TaskFlow",
         "status": "running",
-        "phase": "Phase 1"
+        "phase": "Phase 2",
+        "version":"v2"
     }
 # Health check endpoint URL: GET http://localhost:5000/health
 @app.route("/health")

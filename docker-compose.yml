@@ -1,6 +1,6 @@
 services:
   taskflow-api:
-    image: taskflow-api:v1
+    image: taskflow-api:v2
     container_name: taskflow-api
     ports:
       - "5000:5000"
