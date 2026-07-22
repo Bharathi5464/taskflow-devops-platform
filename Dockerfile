@@ -5,7 +5,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Copy only the requirements file first This improves Docker layer caching
-COPY app/requirements.txt .
+COPY requirements.txt .
 
 # Install all Python dependencies --no-cache-dir reduces the final image size
 RUN pip install --no-cache-dir -r requirements.txt
