@@ -10,4 +10,5 @@ def test_home_endpoint(client): # importing the client function from contest.py
     # Verify the returned JSON values
     assert data["application"] == "TaskFlow"
     assert data["status"] == "running"
-    assert data["phase"] == "Phase 1"
+    assert data["phase"] == "Phase 2"
+    assert data["version"] == "v2"
