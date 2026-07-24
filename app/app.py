@@ -1,7 +1,11 @@
+import os # just importing the system
 # Import Flask framework
 from flask import Flask
 # Import function that registers all API routes
 from routes import register_routes
+APP_NAME = os.getenv("APP_NAME", "TaskFlow")
+APP_PHASE = os.getenv("APP_PHASE", "Phase 2")
+APP_VERSION = os.getenv("APP_VERSION", "v2")
 # Create Flask application instance
 app = Flask(__name__)
 # Basic home route# URL: GET http://localhost:5000/
@@ -9,10 +13,10 @@ app = Flask(__name__)
 def home():
     # Return application information as JSON response
     return {
-        "application": "TaskFlow",
-        "status": "running",
-        "phase": "Phase 2",
-        "version":"v2"
+    "application": APP_NAME,
+    "status": "running",
+    "phase": APP_PHASE,
+    "version": APP_VERSION
     }
 # Health check endpoint URL: GET http://localhost:5000/health
 @app.route("/health")

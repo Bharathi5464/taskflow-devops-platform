@@ -14,7 +14,12 @@ spec:
     spec:
       containers:
         - name: taskflow-container
-          image: taskflow-app:v2
+          image: taskflow-app:v3    
+          envFrom:
+            - configMapRef:
+                name: taskflow-config
+            - secretRef:
+                name: taskflow-secret
           imagePullPolicy: Never
           ports:
             - containerPort: 5000
