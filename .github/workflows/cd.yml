@@ -45,6 +45,37 @@ jobs:
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+      - name: Verify SSH Connection
+        run: |
+          ssh \
+            -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
+            "echo 'Connected to EC2 successfully'"
+      
+      - name: Deploy Application on EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no \
+          ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
+            aws ecr get-login-password --region ap-south-1 | \
+            docker login \
+            --username AWS \
+            --password-stdin \
+            588229931808.dkr.ecr.ap-south-1.amazonaws.com
+      
+            docker pull 588229931808.dkr.ecr.ap-south-1.amazonaws.com/aws-terraform-platform-taskflow:latest
+      
+            docker stop taskflow-app || true
+      
+            docker rm taskflow-app || true
+
+            docker run -d \
+              --name taskflow-app \
+              -p 5000:5000 \
+              --restart unless-stopped \
+              588229931808.dkr.ecr.ap-south-1.amazonaws.com/aws-terraform-platform-taskflow:latest
+      
+          EOF
+
 
 
 
