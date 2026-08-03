@@ -18,7 +18,10 @@ image:
 imagePullSecrets: []
 # This is to override the chart name.
 nameOverride: ""
-fullnameOverride: ""
+fullnameOverride: aws ec2 describe-security-groups \
+  --group-ids sg-07f312dbc46347cd8 \
+  --region ap-south-1 \
+  --query "SecurityGroups[0].IpPermissions"
 
 # This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
 serviceAccount:
