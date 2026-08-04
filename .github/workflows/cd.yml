@@ -75,6 +75,12 @@ jobs:
               588229931808.dkr.ecr.ap-south-1.amazonaws.com/aws-terraform-platform-taskflow:latest
       
           EOF
+      - name: Verify Application Health
+        run: |
+          ssh -o StrictHostKeyChecking=no \
+          ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
+          "curl http://localhost:5000/health"
+
 
 
 
