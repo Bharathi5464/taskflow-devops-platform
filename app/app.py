@@ -38,9 +38,9 @@ register_routes(app)
 if __name__ == "__main__":
     # host="0.0.0.0"  Allows access from outside the container/machine
     # port=5000      Flask application listens on port 5000
-    # debug=True     Enables auto reload and detailed errors during development
+    # debug=False     Enables auto reload and detailed errors during development
     app.run(
         host="0.0.0.0",
         port=5000,
-        debug=True
+        debug=False
     )
