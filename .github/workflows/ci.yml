@@ -28,6 +28,10 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=Bharathi5464_taskflow-devops-platform
+            -Dsonar.organization=bharathi5464
       - name: Build Docker Image
         run: docker build -t taskflow-app:ci . 
       
