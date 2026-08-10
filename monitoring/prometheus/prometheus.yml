@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+  
+scrape_configs:
+  - job_name: "taskflow"
+    static_configs:
+      - targets: ["taskflow-api:5000"]

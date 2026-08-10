@@ -1,6 +1,8 @@
 import os # just importing the system
 # Import Flask framework
 from flask import Flask
+# Imports PrometheusMetrics to expose Flask application metrics for Prometheus monitoring
+from prometheus_flask_exporter import PrometheusMetrics
 # Import function that registers all API routes
 from routes import register_routes
 APP_NAME = os.getenv("APP_NAME", "TaskFlow")
@@ -9,6 +11,8 @@ APP_VERSION = os.getenv("APP_VERSION", "v2")
 # Create Flask application instance
 app = Flask(__name__)
 # Basic home route# URL: GET http://localhost:5000/
+# Enable Prometheus metrics
+metrics = PrometheusMetrics(app)
 @app.route("/")
 def home():
     # Return application information as JSON response
