@@ -35,6 +35,9 @@ jobs:
             -Dsonar.organization=bharathi5464
             -Dsonar.qualitygate.wait=true
             -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.sources=app
+            -Dsonar.tests=tests
+
 
 
       - name: Build Docker Image
