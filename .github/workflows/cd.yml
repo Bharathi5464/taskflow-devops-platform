@@ -91,7 +91,7 @@ jobs:
       - name: Verify SSH Connection
         run: |
           ssh -o StrictHostKeyChecking=no \
-           "${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}" \
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
             "echo Connected to EC2 successfully"
 
       # Connect to EC2 and deploy the new Docker image to Kubernetes
