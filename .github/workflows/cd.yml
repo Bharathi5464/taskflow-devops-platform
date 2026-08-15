@@ -126,24 +126,20 @@ jobs:
 
       # Verify that the Kubernetes pods are running
       # -o wide also shows additional information such as node/IP
-      - name: Verify Kubernetes Deployment
+      - name: Verify Kubernetes Deployment and Health
         run: |
           ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
-            "kubectl get pods -n taskflow -o wide"
-
-
-      # Test whether the application health endpoint is responding
-      # A temporary curl pod is created inside the Kubernetes cluster
-      # It calls the TaskFlow service /health endpoint
-      # --rm removes the temporary pod after the test
-      - name: Verify Application Health
-        run: |
-          ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
-            "kubectl run curl-test \
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
+      
+            echo "=== Kubernetes Pods ==="
+            kubectl get pods -n taskflow -o wide
+      
+            echo "=== Application Health ==="
+            kubectl run curl-test \
               -n taskflow \
               --rm -i \
               --restart=Never \
               --image=curlimages/curl \
-              -- curl -s --fail http://taskflow-service:5000/health"
+              -- curl -s --fail http://taskflow-service:5000/health
+      
+          EOF
