@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: taskflow-deployment
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
       app: taskflow
@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: taskflow-container
-          image: taskflow-app:v3    
+          image: 588229931808.dkr.ecr.ap-south-1.amazonaws.com/aws-terraform-platform-taskflow:latest
           envFrom:
             - configMapRef:
                 name: taskflow-config
@@ -44,7 +44,7 @@ spec:
               cpu: "500m"
               memory: "512Mi"
         
-          imagePullPolicy: Never
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000
 
