@@ -1,89 +1,150 @@
 name: TaskFlow CD Pipeline
+
+# Run this CD pipeline after the TaskFlow CI Pipeline finishes
 on:
   workflow_run:
+    # Watch for completion of this workflow
     workflows: ["TaskFlow CI Pipeline"]
+
+    # Trigger when the CI workflow is completed
     types:
       - completed
+
+
+# Global environment variables used throughout this workflow
 env:
+  # AWS region where our resources are running
   AWS_REGION: ap-south-1
+
+  # Name of the ECR repository where our Docker image will be stored
   ECR_REPOSITORY: aws-terraform-platform-taskflow
-  IMAGE_TAG: latest
+
+  # Use the commit SHA from the CI workflow as the Docker image tag
+  # This gives every image a unique version
+  IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+
 
 jobs:
   deploy:
+
+    # Only deploy if the previous CI workflow completed successfully
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # GitHub provides a temporary Ubuntu machine to execute these steps
     runs-on: ubuntu-latest
     steps:
+      # Download the repository code onto the GitHub Actions runner
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+
+      # Configure AWS credentials so GitHub Actions can communicate with AWS
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
+          # AWS access key stored securely in GitHub Secrets
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          # AWS secret access key stored securely in GitHub Secrets
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-1
+          # Use the AWS region defined above
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Authenticate GitHub Actions with Amazon ECR
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-      #Docker
+
+      # Build the Docker image from the Dockerfile in the repository
       - name: Build Docker Image
         run: |
-          docker build -t taskflow-app:latest .
+          docker build -t taskflow-app:${{ env.IMAGE_TAG }} .
+
+      # Add the ECR repository address to the Docker image
+      # This creates the full image name that will be pushed to ECR
       - name: Tag Docker Image
         run: |
-          docker tag taskflow-app:latest \
-          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          docker tag taskflow-app:${{ env.IMAGE_TAG }} \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+
+      # Push the tagged Docker image to Amazon ECR
       - name: Push Docker Image
         run: |
           docker push \
-          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+
+      # Install SSH client on the GitHub Actions runner
+      # SSH is required to connect from GitHub Actions to our EC2 server
       - name: Install SSH Client
         run: |
           sudo apt-get update
           sudo apt-get install -y openssh-client
+
+      # Start an SSH agent and load the EC2 private key
+      # The private key is stored securely in GitHub Secrets
       - name: Start SSH Agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      # Test whether GitHub Actions can successfully connect to EC2
       - name: Verify SSH Connection
         run: |
           ssh \
             -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
             "echo 'Connected to EC2 successfully'"
-      
-      - name: Deploy Application on EC2
+
+      # Connect to EC2 and deploy the new Docker image to Kubernetes
+      - name: Deploy Application to Kubernetes
+        run: |
+          # SSH into the EC2 server
+          ssh -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
+
+            # Get a temporary authentication token from AWS ECR
+            # Then pass the token to Docker so EC2 can pull private images from ECR
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+            docker login \
+              --username AWS \
+              --password-stdin \
+              ${{ steps.login-ecr.outputs.registry }}
+
+            # Update the image used by the Kubernetes Deployment
+            # Kubernetes will replace the old image with the new ECR image
+            kubectl set image deployment/taskflow-deployment \
+              taskflow-container=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
+              -n taskflow
+
+            # Wait until Kubernetes finishes updating the Deployment
+            # The command fails if the rollout does not complete within 180 seconds
+            kubectl rollout status deployment/taskflow-deployment \
+              -n taskflow \
+              --timeout=180s
+
+          EOF
+
+
+      # Verify that the Kubernetes pods are running
+      # -o wide also shows additional information such as node/IP
+      - name: Verify Kubernetes Deployment
         run: |
           ssh -o StrictHostKeyChecking=no \
-          ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
-            aws ecr get-login-password --region ap-south-1 | \
-            docker login \
-            --username AWS \
-            --password-stdin \
-            588229931808.dkr.ecr.ap-south-1.amazonaws.com
-      
-            docker pull 588229931808.dkr.ecr.ap-south-1.amazonaws.com/aws-terraform-platform-taskflow:latest
-      
-            docker stop taskflow-app || true
-      
-            docker rm taskflow-app || true
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
+            "kubectl get pods -n taskflow -o wide"
 
-            docker run -d \
-              --name taskflow-app \
-              -p 5000:5000 \
-              --restart unless-stopped \
-              588229931808.dkr.ecr.ap-south-1.amazonaws.com/aws-terraform-platform-taskflow:latest
-      
-          EOF
+
+      # Test whether the application health endpoint is responding
+      # A temporary curl pod is created inside the Kubernetes cluster
+      # It calls the TaskFlow service /health endpoint
+      # --rm removes the temporary pod after the test
       - name: Verify Application Health
         run: |
           ssh -o StrictHostKeyChecking=no \
-          ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
-          "curl http://localhost:5000/health"
-
-
-
-
-
-
-
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
+            "kubectl run curl-test \
+              -n taskflow \
+              --rm -i \
+              --restart=Never \
+              --image=curlimages/curl \
+              -- curl -s --fail http://taskflow-service:5000/health"
