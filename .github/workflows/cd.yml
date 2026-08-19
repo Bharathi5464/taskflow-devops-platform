@@ -24,15 +24,11 @@ jobs:
 
     steps:
 
-      # Checkout the same commit that passed CI
+      # Checkout the exact commit that passed CI
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-
-      # Install Helm on GitHub Actions runner
-      - name: Setup Helm
-        uses: azure/setup-helm@v4
 
       # Configure AWS access
       - name: Configure AWS Credentials
@@ -76,18 +72,22 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
+      # Copy the exact Helm chart to EC2
+      - name: Copy Helm Chart to EC2
+        run: |
+          tar -czf taskflow-chart.tar.gz taskflow-chart
+
+          scp -o StrictHostKeyChecking=no \
+            taskflow-chart.tar.gz \
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}:/tmp/taskflow-chart.tar.gz
+
       # Deploy application to Kubernetes
       - name: Deploy Application to Kubernetes
         run: |
           ssh -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
 
-            # Login EC2 to ECR
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-            docker login \
-              --username AWS \
-              --password-stdin \
-              ${{ steps.login-ecr.outputs.registry }}
+            set -e
 
             # Install Helm on EC2 if it is not already installed
             if ! command -v helm >/dev/null 2>&1; then
@@ -97,10 +97,40 @@ jobs:
               echo "Helm already installed: \$(helm version --short)"
             fi
 
+            # Verify Helm installation
+            helm version --short
+
+            # Prepare namespace
+            kubectl create namespace taskflow \
+              --dry-run=client \
+              -o yaml | kubectl apply -f -
+
+            # Extract the Helm chart from the CI commit
+            rm -rf /tmp/taskflow-chart
+            tar -xzf /tmp/taskflow-chart.tar.gz -C /tmp
+
+            # Login EC2 to ECR
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+            docker login \
+              --username AWS \
+              --password-stdin \
+              ${{ steps.login-ecr.outputs.registry }}
+
+            # Refresh Kubernetes ECR pull secret
+            ECR_PASSWORD=\$(aws ecr get-login-password \
+              --region ${{ env.AWS_REGION }})
+
+            kubectl create secret docker-registry ecr-registry-secret \
+              --docker-server=${{ steps.login-ecr.outputs.registry }} \
+              --docker-username=AWS \
+              --docker-password="\$ECR_PASSWORD" \
+              -n taskflow \
+              --dry-run=client \
+              -o yaml | kubectl apply -f -
+
             # Install or upgrade Helm release
-            helm upgrade --install taskflow ./taskflow-chart \
+            helm upgrade --install taskflow /tmp/taskflow-chart \
               --namespace taskflow \
-              --create-namespace \
               --set image.repository=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }} \
               --set image.tag=${{ env.IMAGE_TAG }} \
               --set image.pullPolicy=Always \
@@ -123,6 +153,10 @@ jobs:
             # Check Pods
             echo "=== Kubernetes Pods ==="
             kubectl get pods -n taskflow -o wide
+
+            # Check Helm release
+            echo "=== Helm Release ==="
+            helm list -n taskflow
 
             # Check application health
             echo "=== Application Health ==="
