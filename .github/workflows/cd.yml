@@ -89,10 +89,10 @@ jobs:
 
             set -e
 
-            # Install Helm on EC2 if it is not already installed
+            # Install Helm if it is not already installed
             if ! command -v helm >/dev/null 2>&1; then
               echo "Helm not found. Installing Helm..."
-              curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+              curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
             else
               echo "Helm already installed: \$(helm version --short)"
             fi
@@ -100,7 +100,7 @@ jobs:
             # Verify Helm installation
             helm version --short
 
-            # Prepare namespace
+            # Create namespace if needed
             kubectl create namespace taskflow \
               --dry-run=client \
               -o yaml | kubectl apply -f -
@@ -109,7 +109,7 @@ jobs:
             rm -rf /tmp/taskflow-chart
             tar -xzf /tmp/taskflow-chart.tar.gz -C /tmp
 
-            # Login EC2 to ECR
+            # Login to ECR from EC2
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
             docker login \
               --username AWS \
@@ -137,7 +137,7 @@ jobs:
               --wait \
               --timeout 180s
 
-            # Wait for deployment rollout
+            # Verify deployment rollout
             kubectl rollout status deployment/taskflow-taskflow-chart \
               -n taskflow \
               --timeout=180s
