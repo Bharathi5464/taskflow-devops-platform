@@ -79,7 +79,7 @@ jobs:
 
           scp -o StrictHostKeyChecking=no \
             taskflow-chart.tar.gz \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}:/tmp/taskflow-chart.tar.gz
+            "${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}:/tmp/taskflow-chart.tar.gz"
 
       # Deploy application to Kubernetes
       - name: Deploy Application to Kubernetes
@@ -89,7 +89,7 @@ jobs:
 
             set -e
 
-            # Install Helm if it is not already installed
+            # Install Helm on EC2 if missing
             if ! command -v helm >/dev/null 2>&1; then
               echo "Helm not found. Installing Helm..."
               curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
@@ -97,7 +97,7 @@ jobs:
               echo "Helm already installed: \$(helm version --short)"
             fi
 
-            # Verify Helm installation
+            # Verify Helm
             helm version --short
 
             # Create namespace if needed
@@ -105,11 +105,11 @@ jobs:
               --dry-run=client \
               -o yaml | kubectl apply -f -
 
-            # Extract the Helm chart from the CI commit
+            # Extract the Helm chart
             rm -rf /tmp/taskflow-chart
             tar -xzf /tmp/taskflow-chart.tar.gz -C /tmp
 
-            # Login to ECR from EC2
+            # Login EC2 to ECR
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
             docker login \
               --username AWS \
