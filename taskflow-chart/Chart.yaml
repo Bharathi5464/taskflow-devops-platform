@@ -3,10 +3,8 @@ name: taskflow-chart
 description: Production-ready Helm chart for the TaskFlow DevOps Platform
 
 # A chart can be either an 'application' or a 'library' chart.
-#
 # Application charts are a collection of templates that can be packaged into versioned archives
 # to be deployed.
-#
 # Library charts provide useful utilities or functions for the chart developer. They're included as
 # a dependency of application charts to inject those utilities and functions into the rendering
 # pipeline. Library charts do not define any templates and therefore cannot be deployed.
@@ -21,4 +19,4 @@ version: 1.1.0
 # incremented each time you make changes to the application. Versions are not expected to
 # follow Semantic Versioning. They should reflect the version the application is using.
 # It is recommended to use it with quotes.
-appVersion: "v4"
+appVersion: "v7"
