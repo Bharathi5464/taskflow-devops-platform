@@ -119,7 +119,7 @@ jobs:
             "${EC2_USERNAME}@${EC2_HOST}" \
             "command -v helm && helm version --short"
 
-      # Deploy application to Kind
+      # Deploy application to Kind.
       - name: Deploy to EC2 Kubernetes
         run: |
           EC2_HOST=$(echo "${{ secrets.EC2_HOST }}" | tr -d '[:space:]')
