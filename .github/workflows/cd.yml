@@ -72,53 +72,65 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      # Deploy application to Kubernetes
-      - name: Deploy Application to Kubernetes
+      # Install Helm on EC2
+      - name: Install Helm on EC2
         run: |
           ssh -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
 
             set -e
 
-            # Get the exact repository revision that passed CI
-            REPO_DIR=/home/ec2-user/taskflow-project
-
-            if [ ! -d "$REPO_DIR/.git" ]; then
-              echo "Repository not found. Cloning..."
-              git clone https://github.com/Bharathi5464/taskflow-devops-platform.git "$REPO_DIR"
+            if command -v helm >/dev/null 2>&1; then
+              echo "Helm already installed: $(helm version --short)"
+              exit 0
             fi
 
-            cd "$REPO_DIR"
+            echo "Helm not found. Installing Helm v3.19.0..."
 
+            HELM_VERSION="v3.19.0"
+
+            curl -fsSL \
+              "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+              -o /tmp/helm.tar.gz
+
+            tar -xzf /tmp/helm.tar.gz -C /tmp
+
+            sudo install -m 0755 \
+              /tmp/linux-amd64/helm \
+              /usr/local/bin/helm
+
+            rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
+
+            echo "Helm installed: $(helm version --short)"
+
+          EOF
+
+      # Deploy application to Kubernetes
+      - name: Deploy Application to Kubernetes
+        run: |
+          ssh -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
+
+            set -e
+
+            REPO_DIR=/home/ec2-user/taskflow-project
+
+            # Clone repository on a new server
+            if [ ! -d "\$REPO_DIR/.git" ]; then
+              git clone \
+                https://github.com/Bharathi5464/taskflow-devops-platform.git \
+                "\$REPO_DIR"
+            fi
+
+            cd "\$REPO_DIR"
+
+            # Get exact commit that passed CI
             git fetch origin
             git reset --hard
             git clean -fd
             git checkout ${{ env.IMAGE_TAG }}
 
-            # Install Helm on EC2 if missing
-            if ! command -v helm >/dev/null 2>&1; then
-              echo "Helm not found. Installing Helm..."
-
-              HELM_VERSION="v3.19.0"
-
-              curl -fsSL \
-                "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-                -o /tmp/helm.tar.gz
-
-              tar -xzf /tmp/helm.tar.gz -C /tmp
-
-              sudo install -m 0755 \
-                /tmp/linux-amd64/helm \
-                /usr/local/bin/helm
-
-              rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
-
-              echo "Helm installed successfully."
-            else
-              echo "Helm already installed: $(helm version --short)"
-            fi
-
-            # Verify Helm installation
+            # Verify Helm
             helm version --short
 
             # Create namespace if needed
@@ -126,19 +138,19 @@ jobs:
               --dry-run=client \
               -o yaml | kubectl apply -f -
 
-            # Refresh Kubernetes ECR pull secret
-            ECR_PASSWORD=$(aws ecr get-login-password \
+            # Refresh ECR pull secret
+            ECR_PASSWORD=\$(aws ecr get-login-password \
               --region ${{ env.AWS_REGION }})
 
             kubectl create secret docker-registry ecr-registry-secret \
               --docker-server=${{ steps.login-ecr.outputs.registry }} \
               --docker-username=AWS \
-              --docker-password="$ECR_PASSWORD" \
+              --docker-password="\$ECR_PASSWORD" \
               -n taskflow \
               --dry-run=client \
               -o yaml | kubectl apply -f -
 
-            # Install or upgrade Helm release
+            # Deploy using Helm
             helm upgrade --install taskflow ./taskflow-chart \
               --namespace taskflow \
               --set image.repository=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }} \
@@ -148,8 +160,9 @@ jobs:
               --timeout 180s \
               --atomic
 
-            # Verify deployment rollout
-            kubectl rollout status deployment/taskflow-taskflow-chart \
+            # Verify rollout
+            kubectl rollout status \
+              deployment/taskflow-taskflow-chart \
               -n taskflow \
               --timeout=180s
 
@@ -163,21 +176,16 @@ jobs:
 
             set -e
 
-            # Check Pods
-            echo "=== Kubernetes Pods ==="
             kubectl get pods -n taskflow -o wide
 
-            # Check Helm release
-            echo "=== Helm Release ==="
             helm list -n taskflow
 
-            # Check application health
-            echo "=== Application Health ==="
             kubectl run curl-test \
               -n taskflow \
               --rm -i \
               --restart=Never \
               --image=curlimages/curl \
-              -- curl -fsS http://taskflow-taskflow-chart:5000/health
+              -- curl -fsS \
+              http://taskflow-taskflow-chart:5000/health
 
           EOF
