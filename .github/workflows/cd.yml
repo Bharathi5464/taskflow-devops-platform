@@ -72,15 +72,6 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      # Copy the exact Helm chart to EC2
-      - name: Copy Helm Chart to EC2
-        run: |
-          tar -czf taskflow-chart.tar.gz taskflow-chart
-
-          scp -o StrictHostKeyChecking=no \
-            taskflow-chart.tar.gz \
-            "${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}:/tmp/taskflow-chart.tar.gz"
-
       # Deploy application to Kubernetes
       - name: Deploy Application to Kubernetes
         run: |
@@ -88,6 +79,21 @@ jobs:
             ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
 
             set -e
+            # Get the exact repository revision that passed CI
+            REPO_DIR=/home/ec2-user/taskflow-project
+
+            if [ ! -d "$REPO_DIR/.git" ]; then
+              echo "Repository not found. Cloning..."
+              git clone https://github.com/Bharathi5464/taskflow-devops-platform.git "$REPO_DIR"
+            fi
+
+            cd "$REPO_DIR"
+
+            git fetch origin
+            git reset --hard
+            git clean -fd
+            git checkout ${{ env.IMAGE_TAG }}
+
 
             # Install Helm on EC2 if missing
             if ! command -v helm >/dev/null 2>&1; then
@@ -105,16 +111,6 @@ jobs:
               --dry-run=client \
               -o yaml | kubectl apply -f -
 
-            # Extract the Helm chart
-            rm -rf /tmp/taskflow-chart
-            tar -xzf /tmp/taskflow-chart.tar.gz -C /tmp
-
-            # Login EC2 to ECR
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-            docker login \
-              --username AWS \
-              --password-stdin \
-              ${{ steps.login-ecr.outputs.registry }}
 
             # Refresh Kubernetes ECR pull secret
             ECR_PASSWORD=\$(aws ecr get-login-password \
@@ -129,7 +125,7 @@ jobs:
               -o yaml | kubectl apply -f -
 
             # Install or upgrade Helm release
-            helm upgrade --install taskflow /tmp/taskflow-chart \
+            helm upgrade --install taskflow ./taskflow-chart \
               --namespace taskflow \
               --set image.repository=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }} \
               --set image.tag=${{ env.IMAGE_TAG }} \
@@ -140,7 +136,8 @@ jobs:
             # Verify deployment rollout
             kubectl rollout status deployment/taskflow-taskflow-chart \
               -n taskflow \
-              --timeout=180s
+              --timeout=180s \
+              --atomic
 
           EOF
 
@@ -165,6 +162,5 @@ jobs:
               --rm -i \
               --restart=Never \
               --image=curlimages/curl \
-              -- curl -s --fail http://taskflow-taskflow-chart:5000/health
-
+              -- curl -s --fsS http://taskflow-taskflow-chart:5000/health
           EOF
