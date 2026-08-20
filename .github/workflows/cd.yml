@@ -1,36 +1,28 @@
 name: TaskFlow CD Pipeline
 
-# Run CD after CI pipeline finishes
 on:
   workflow_run:
     workflows: ["TaskFlow CI Pipeline"]
     types:
       - completed
 
-# Global variables
 env:
   AWS_REGION: ap-south-1
   ECR_REPOSITORY: aws-terraform-platform-taskflow
-
-  # Use CI commit SHA as image version
   IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
 
 jobs:
   deploy:
-
-    # Deploy only when CI succeeds
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
 
-      # Checkout the exact commit that passed CI
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      # Configure AWS access
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -38,166 +30,168 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Login to ECR
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Build Docker image
       - name: Build Docker Image
         run: |
           docker build -t taskflow-app:${{ env.IMAGE_TAG }} .
 
-      # Tag image for ECR
       - name: Tag Docker Image
         run: |
           docker tag taskflow-app:${{ env.IMAGE_TAG }} \
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
 
-      # Push image to ECR
       - name: Push Docker Image
         run: |
           docker push \
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
 
-      # Install SSH client
       - name: Install SSH Client
         run: |
           sudo apt-get update
           sudo apt-get install -y openssh-client
 
-      # Load EC2 SSH key
       - name: Start SSH Agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      # Install Helm on EC2 if missing
-      - name: Install Helm on EC2
+      # ---------------------------------------------------------
+      # STEP 1: Verify EC2 + Helm
+      # ---------------------------------------------------------
+
+      - name: Verify EC2 and Helm
         run: |
           ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
 
-          set -e
+            set -e
 
-          echo "Checking Helm..."
+            echo "=== EC2 Connected ==="
+            whoami
+            hostname
 
-          if command -v helm >/dev/null 2>&1; then
-              echo "Helm already installed: $(helm version --short)"
-          else
-              echo "Helm not found. Installing Helm v3.19.0..."
-
-              HELM_VERSION="v3.19.0"
-
-              curl -fsSL \
-                "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-                -o /tmp/helm.tar.gz
-
-              tar -xzf /tmp/helm.tar.gz -C /tmp
-
-              sudo install -m 0755 \
-                /tmp/linux-amd64/helm \
-                /usr/local/bin/helm
-
-              rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
-
-              echo "Helm installation completed."
-          fi
-
-          command -v helm
-          helm version --short
+            echo "=== Helm ==="
+            command -v helm || true
+            helm version --short
 
           EOF
 
-      # Deploy application to Kubernetes
+      # ---------------------------------------------------------
+      # STEP 2: Deploy
+      # ---------------------------------------------------------
+
       - name: Deploy Application to Kubernetes
         run: |
           ssh -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
 
-          set -e
+            set -e
 
-          # Get the exact repository revision that passed CI
-          REPO_DIR=/home/${{ secrets.EC2_USERNAME }}/taskflow-project
+            REPO_DIR=/home/ec2-user/taskflow-project
 
-          # Clone repository on a new server
-          if [ ! -d "\$REPO_DIR/.git" ]; then
-            echo "Repository not found. Cloning..."
-            git clone \
-              https://github.com/Bharathi5464/taskflow-devops-platform.git \
-              "\$REPO_DIR"
-          fi
+            echo "=== Repository ==="
 
-          cd "\$REPO_DIR"
+            if [ ! -d "\$REPO_DIR/.git" ]; then
+              git clone \
+                https://github.com/Bharathi5464/taskflow-devops-platform.git \
+                "\$REPO_DIR"
+            fi
 
-          # Checkout exact commit that passed CI
-          git fetch origin
-          git reset --hard
-          git clean -fd
-          git checkout ${{ env.IMAGE_TAG }}
+            cd "\$REPO_DIR"
 
-          # Verify Helm
-          helm version --short
+            git fetch origin
+            git reset --hard
+            git clean -fd
+            git checkout ${IMAGE_TAG}
 
-          # Create namespace if needed
-          kubectl create namespace taskflow \
-            --dry-run=client \
-            -o yaml | kubectl apply -f -
+            echo "Commit:"
+            git rev-parse --short HEAD
 
-          # Refresh Kubernetes ECR pull secret
-          ECR_PASSWORD=\$(aws ecr get-login-password \
-            --region ${{ env.AWS_REGION }})
+            echo "=== Helm ==="
+            helm version --short
 
-          kubectl create secret docker-registry ecr-registry-secret \
-            --docker-server=${{ steps.login-ecr.outputs.registry }} \
-            --docker-username=AWS \
-            --docker-password="\$ECR_PASSWORD" \
-            -n taskflow \
-            --dry-run=client \
-            -o yaml | kubectl apply -f -
+            echo "=== Kubernetes ==="
+            kubectl version --client
 
-          # Deploy using Helm
-          helm upgrade --install taskflow ./taskflow-chart \
-            --namespace taskflow \
-            --set image.repository=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }} \
-            --set image.tag=${{ env.IMAGE_TAG }} \
-            --set image.pullPolicy=Always \
-            --wait \
-            --timeout 180s \
-            --atomic
+            echo "=== Namespace ==="
 
-          # Verify rollout
-          kubectl rollout status \
-            deployment/taskflow-taskflow-chart \
-            -n taskflow \
-            --timeout=180s
+            kubectl create namespace taskflow \
+              --dry-run=client \
+              -o yaml | kubectl apply -f -
+
+            echo "=== ECR Login Secret ==="
+
+            ECR_PASSWORD=\$(aws ecr get-login-password \
+              --region ${AWS_REGION})
+
+            kubectl create secret docker-registry ecr-registry-secret \
+              --docker-server=${{ steps.login-ecr.outputs.registry }} \
+              --docker-username=AWS \
+              --docker-password="\$ECR_PASSWORD" \
+              -n taskflow \
+              --dry-run=client \
+              -o yaml | kubectl apply -f -
+
+            echo "=== Helm Deployment ==="
+
+            helm upgrade --install taskflow ./taskflow-chart \
+              --namespace taskflow \
+              --set image.repository=${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY} \
+              --set image.tag=${IMAGE_TAG} \
+              --set image.pullPolicy=Always \
+              --wait \
+              --timeout 180s \
+              --atomic
+
+            echo "=== Rollout ==="
+
+            kubectl rollout status \
+              deployment/taskflow-taskflow-chart \
+              -n taskflow \
+              --timeout=180s
+
+            echo "=== Deployment Completed ==="
 
           EOF
 
-      # Verify deployment and application health
-      - name: Verify Kubernetes Deployment and Health
+      # ---------------------------------------------------------
+      # STEP 3: Verify
+      # ---------------------------------------------------------
+
+      - name: Verify Deployment and Health
         run: |
           ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
 
-          set -e
+            set -e
 
-          # Check Pods
-          echo "=== Kubernetes Pods ==="
-          kubectl get pods -n taskflow -o wide
+            echo "=== Pods ==="
+            kubectl get pods -n taskflow -o wide
 
-          # Check Helm release
-          echo "=== Helm Release ==="
-          helm list -n taskflow
+            echo "=== Helm Release ==="
+            helm list -n taskflow
 
-          # Check application health
-          echo "=== Application Health ==="
-          kubectl run curl-test \
-            -n taskflow \
-            --rm -i \
-            --restart=Never \
-            --image=curlimages/curl \
-            -- \
-            curl -fsS http://taskflow-taskflow-chart:5000/health
+            echo "=== Deployment ==="
+            kubectl get deployment -n taskflow
+
+            echo "=== Service ==="
+            kubectl get service -n taskflow
+
+            echo "=== Application Health ==="
+
+            kubectl run curl-test \
+              -n taskflow \
+              --rm -i \
+              --restart=Never \
+              --image=curlimages/curl \
+              -- curl -fsS \
+              http://taskflow-taskflow-chart:5000/health
+
+            echo
+            echo "=== CD SUCCESS ==="
 
           EOF
+
