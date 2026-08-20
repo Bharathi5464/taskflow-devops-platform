@@ -12,7 +12,7 @@ env:
   AWS_REGION: ap-south-1
   ECR_REPOSITORY: aws-terraform-platform-taskflow
 
-  # Use the exact CI commit as image version
+  # Use CI commit SHA as image version
   IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
 
 jobs:
@@ -72,50 +72,55 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
+      # Install Helm on EC2 if missing
       - name: Install Helm on EC2
         run: |
           ssh -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
 
-            set -e
+          set -e
 
-            if command -v helm >/dev/null 2>&1; then
+          echo "Checking Helm..."
+
+          if command -v helm >/dev/null 2>&1; then
               echo "Helm already installed: $(helm version --short)"
-              exit 0
-            fi
+          else
+              echo "Helm not found. Installing Helm v3.19.0..."
 
-            echo "Helm not found. Installing Helm v3.19.0..."
+              HELM_VERSION="v3.19.0"
 
-            HELM_VERSION="v3.19.0"
+              curl -fsSL \
+                "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+                -o /tmp/helm.tar.gz
 
-            curl -fsSL \
-              "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-              -o /tmp/helm.tar.gz
+              tar -xzf /tmp/helm.tar.gz -C /tmp
 
-            tar -xzf /tmp/helm.tar.gz -C /tmp
+              sudo install -m 0755 \
+                /tmp/linux-amd64/helm \
+                /usr/local/bin/helm
 
-            sudo install -m 0755 \
-              /tmp/linux-amd64/helm \
-              /usr/local/bin/helm
+              rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
 
-            rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
+              echo "Helm installation completed."
+          fi
 
-            echo "Helm installed successfully:"
-            helm version --short
+          command -v helm
+          helm version --short
 
           EOF
+
       # Deploy application to Kubernetes
       - name: Deploy Application to Kubernetes
         run: |
           ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
-            'bash -s' << EOF
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
 
           set -e
 
           # Get the exact repository revision that passed CI
-          REPO_DIR=/home/ec2-user/taskflow-project
+          REPO_DIR=/home/${{ secrets.EC2_USERNAME }}/taskflow-project
 
+          # Clone repository on a new server
           if [ ! -d "\$REPO_DIR/.git" ]; then
             echo "Repository not found. Cloning..."
             git clone \
@@ -125,7 +130,7 @@ jobs:
 
           cd "\$REPO_DIR"
 
-          # Synchronize repository with CI commit
+          # Checkout exact commit that passed CI
           git fetch origin
           git reset --hard
           git clean -fd
@@ -139,7 +144,7 @@ jobs:
             --dry-run=client \
             -o yaml | kubectl apply -f -
 
-          # Refresh ECR pull secret
+          # Refresh Kubernetes ECR pull secret
           ECR_PASSWORD=\$(aws ecr get-login-password \
             --region ${{ env.AWS_REGION }})
 
@@ -173,24 +178,26 @@ jobs:
       - name: Verify Kubernetes Deployment and Health
         run: |
           ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
-            'bash -s' << 'EOF'
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
 
           set -e
 
+          # Check Pods
           echo "=== Kubernetes Pods ==="
           kubectl get pods -n taskflow -o wide
 
+          # Check Helm release
           echo "=== Helm Release ==="
           helm list -n taskflow
 
+          # Check application health
           echo "=== Application Health ==="
           kubectl run curl-test \
             -n taskflow \
             --rm -i \
             --restart=Never \
             --image=curlimages/curl \
-            -- curl -fsS \
-              http://taskflow-taskflow-chart:5000/health
+            -- \
+            curl -fsS http://taskflow-taskflow-chart:5000/health
 
           EOF
