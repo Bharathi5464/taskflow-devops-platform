@@ -60,7 +60,7 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      # Test SSH connection
+      # Test SSH
       - name: Test EC2 SSH
         run: |
           EC2_HOST=$(echo "${{ secrets.EC2_HOST }}" | tr -d '[:space:]')
@@ -70,37 +70,56 @@ jobs:
             "${EC2_USERNAME}@${EC2_HOST}" \
             "echo 'EC2 SSH connection successful'"
 
-      # Install Helm on EC2 if missing
+      # Install Helm on EC2
       - name: Install Helm on EC2
         run: |
           EC2_HOST=$(echo "${{ secrets.EC2_HOST }}" | tr -d '[:space:]')
           EC2_USERNAME=$(echo "${{ secrets.EC2_USERNAME }}" | tr -d '[:space:]')
 
-          ssh -o StrictHostKeyChecking=no \
-            "${EC2_USERNAME}@${EC2_HOST}" \
-            'bash -s' << 'EOF'
+          cat > install-helm.sh << 'SCRIPT'
+          #!/bin/bash
 
           set -e
 
-          if ! command -v helm >/dev/null 2>&1; then
-            HELM_VERSION="v3.19.0"
-
-            curl -fsSL \
-              "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-              -o /tmp/helm.tar.gz
-
-            tar -xzf /tmp/helm.tar.gz -C /tmp
-
-            sudo install -m 0755 \
-              /tmp/linux-amd64/helm \
-              /usr/local/bin/helm
-
-            rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
+          if command -v helm >/dev/null 2>&1; then
+            echo "Helm already installed"
+            exit 0
           fi
 
-          EOF
+          echo "Installing Helm v3.19.0..."
 
-      # Deploy application
+          HELM_VERSION="v3.19.0"
+
+          curl -fsSL \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+            -o /tmp/helm.tar.gz
+
+          tar -xzf /tmp/helm.tar.gz -C /tmp
+
+          sudo install -m 0755 \
+            /tmp/linux-amd64/helm \
+            /usr/local/bin/helm
+
+          rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
+
+          echo "Helm installed successfully"
+          SCRIPT
+
+          chmod +x install-helm.sh
+
+          scp -o StrictHostKeyChecking=no \
+            install-helm.sh \
+            "${EC2_USERNAME}@${EC2_HOST}:/tmp/install-helm.sh"
+
+          ssh -o StrictHostKeyChecking=no \
+            "${EC2_USERNAME}@${EC2_HOST}" \
+            "bash /tmp/install-helm.sh"
+
+          ssh -o StrictHostKeyChecking=no \
+            "${EC2_USERNAME}@${EC2_HOST}" \
+            "command -v helm && helm version --short"
+
+      # Deploy application to Kind
       - name: Deploy to EC2 Kubernetes
         run: |
           EC2_HOST=$(echo "${{ secrets.EC2_HOST }}" | tr -d '[:space:]')
