@@ -76,9 +76,10 @@ jobs:
       - name: Deploy Application to Kubernetes
         run: |
           ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
 
             set -e
+
             # Get the exact repository revision that passed CI
             REPO_DIR=/home/ec2-user/taskflow-project
 
@@ -94,16 +95,30 @@ jobs:
             git clean -fd
             git checkout ${{ env.IMAGE_TAG }}
 
-
             # Install Helm on EC2 if missing
             if ! command -v helm >/dev/null 2>&1; then
               echo "Helm not found. Installing Helm..."
-              curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+              HELM_VERSION="v3.19.0"
+
+              curl -fsSL \
+                "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+                -o /tmp/helm.tar.gz
+
+              tar -xzf /tmp/helm.tar.gz -C /tmp
+
+              sudo install -m 0755 \
+                /tmp/linux-amd64/helm \
+                /usr/local/bin/helm
+
+              rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
+
+              echo "Helm installed successfully."
             else
-              echo "Helm already installed: \$(helm version --short)"
+              echo "Helm already installed: $(helm version --short)"
             fi
 
-            # Verify Helm
+            # Verify Helm installation
             helm version --short
 
             # Create namespace if needed
@@ -111,15 +126,14 @@ jobs:
               --dry-run=client \
               -o yaml | kubectl apply -f -
 
-
             # Refresh Kubernetes ECR pull secret
-            ECR_PASSWORD=\$(aws ecr get-login-password \
+            ECR_PASSWORD=$(aws ecr get-login-password \
               --region ${{ env.AWS_REGION }})
 
             kubectl create secret docker-registry ecr-registry-secret \
               --docker-server=${{ steps.login-ecr.outputs.registry }} \
               --docker-username=AWS \
-              --docker-password="\$ECR_PASSWORD" \
+              --docker-password="$ECR_PASSWORD" \
               -n taskflow \
               --dry-run=client \
               -o yaml | kubectl apply -f -
@@ -131,13 +145,13 @@ jobs:
               --set image.tag=${{ env.IMAGE_TAG }} \
               --set image.pullPolicy=Always \
               --wait \
-              --timeout 180s
+              --timeout 180s \
+              --atomic
 
             # Verify deployment rollout
             kubectl rollout status deployment/taskflow-taskflow-chart \
               -n taskflow \
-              --timeout=180s \
-              --atomic
+              --timeout=180s
 
           EOF
 
@@ -146,6 +160,8 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
+
+            set -e
 
             # Check Pods
             echo "=== Kubernetes Pods ==="
@@ -162,5 +178,6 @@ jobs:
               --rm -i \
               --restart=Never \
               --image=curlimages/curl \
-              -- curl -s --fsS http://taskflow-taskflow-chart:5000/health
+              -- curl -fsS http://taskflow-taskflow-chart:5000/health
+
           EOF
