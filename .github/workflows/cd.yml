@@ -80,28 +80,33 @@ jobs:
 
             set -e
 
+            echo "Checking Helm..."
+
             if command -v helm >/dev/null 2>&1; then
-              echo "Helm already installed: $(helm version --short)"
-              exit 0
+              echo "Helm already installed"
+              command -v helm
+              helm version --short
+            else
+              echo "Helm not found. Installing Helm v3.19.0..."
+
+              HELM_VERSION="v3.19.0"
+
+              curl -fsSL \
+                "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+                -o /tmp/helm.tar.gz
+
+              tar -xzf /tmp/helm.tar.gz -C /tmp
+
+              sudo install -m 0755 \
+                /tmp/linux-amd64/helm \
+                /usr/local/bin/helm
+
+              rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
+
+              echo "Helm installation completed"
+              command -v helm
+              helm version --short
             fi
-
-            echo "Helm not found. Installing Helm v3.19.0..."
-
-            HELM_VERSION="v3.19.0"
-
-            curl -fsSL \
-              "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
-              -o /tmp/helm.tar.gz
-
-            tar -xzf /tmp/helm.tar.gz -C /tmp
-
-            sudo install -m 0755 \
-              /tmp/linux-amd64/helm \
-              /usr/local/bin/helm
-
-            rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
-
-            echo "Helm installed: $(helm version --short)"
 
           EOF
 
@@ -130,7 +135,7 @@ jobs:
             git clean -fd
             git checkout ${{ env.IMAGE_TAG }}
 
-            # Verify Helm
+            # Verify Helm is available
             helm version --short
 
             # Create namespace if needed
