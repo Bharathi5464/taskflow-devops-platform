@@ -72,22 +72,18 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      # Install Helm on EC2
       - name: Install Helm on EC2
         run: |
           ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} \
-            'bash -s' << 'EOF'
+            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'EOF'
 
-          set -e
+            set -e
 
-          echo "=== Helm Setup ==="
+            if command -v helm >/dev/null 2>&1; then
+              echo "Helm already installed: $(helm version --short)"
+              exit 0
+            fi
 
-          if command -v helm >/dev/null 2>&1; then
-            echo "Helm already installed"
-            command -v helm
-            helm version --short
-          else
             echo "Helm not found. Installing Helm v3.19.0..."
 
             HELM_VERSION="v3.19.0"
@@ -104,13 +100,10 @@ jobs:
 
             rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
 
-            echo "Helm installation completed"
-            command -v helm
+            echo "Helm installed successfully:"
             helm version --short
-          fi
 
           EOF
-
       # Deploy application to Kubernetes
       - name: Deploy Application to Kubernetes
         run: |
