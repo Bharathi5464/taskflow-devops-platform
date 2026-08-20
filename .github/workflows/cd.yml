@@ -18,11 +18,13 @@ jobs:
 
     steps:
 
+      # Checkout the exact commit that passed CI
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
+      # Configure AWS
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -30,168 +32,112 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # Login to ECR
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build Docker Image
+      # Build and push image
+      - name: Build and Push Docker Image
         run: |
-          docker build -t taskflow-app:${{ env.IMAGE_TAG }} .
+          docker build -t taskflow-app:${IMAGE_TAG} .
 
-      - name: Tag Docker Image
-        run: |
-          docker tag taskflow-app:${{ env.IMAGE_TAG }} \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          docker tag taskflow-app:${IMAGE_TAG} \
+            ${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}
 
-      - name: Push Docker Image
-        run: |
           docker push \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            ${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}
 
+      # Install SSH
       - name: Install SSH Client
         run: |
           sudo apt-get update
           sudo apt-get install -y openssh-client
 
+      # Load EC2 SSH key
       - name: Start SSH Agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      # ---------------------------------------------------------
-      # STEP 1: Verify EC2 + Helm
-      # ---------------------------------------------------------
-
-      - name: Verify EC2 and Helm
+      # Install Helm on EC2 if it is not already installed
+      - name: Install Helm on EC2
         run: |
           ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
+            "${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}" \
+            'bash -s' << 'EOF'
 
-            set -e
+          set -e
 
-            echo "=== EC2 Connected ==="
-            whoami
-            hostname
+          if ! command -v helm >/dev/null 2>&1; then
+            HELM_VERSION="v3.19.0"
 
-            echo "=== Helm ==="
-            command -v helm || true
-            helm version --short
+            curl -fsSL \
+              "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+              -o /tmp/helm.tar.gz
+
+            tar -xzf /tmp/helm.tar.gz -C /tmp
+
+            sudo install -m 0755 \
+              /tmp/linux-amd64/helm \
+              /usr/local/bin/helm
+
+            rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
+          fi
 
           EOF
 
-      # ---------------------------------------------------------
-      # STEP 2: Deploy
-      # ---------------------------------------------------------
-
-      - name: Deploy Application to Kubernetes
+      # Deploy the new image using Helm
+      - name: Deploy to EC2 Kubernetes
         run: |
           ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
+            "${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}" \
+            'bash -s' << EOF
 
-            set -e
+          set -e
 
-            REPO_DIR=/home/ec2-user/taskflow-project
+          REPO_DIR=/home/ec2-user/taskflow-project
 
-            echo "=== Repository ==="
+          if [ ! -d "\$REPO_DIR/.git" ]; then
+            git clone \
+              https://github.com/Bharathi5464/taskflow-devops-platform.git \
+              "\$REPO_DIR"
+          fi
 
-            if [ ! -d "\$REPO_DIR/.git" ]; then
-              git clone \
-                https://github.com/Bharathi5464/taskflow-devops-platform.git \
-                "\$REPO_DIR"
-            fi
+          cd "\$REPO_DIR"
 
-            cd "\$REPO_DIR"
+          git fetch origin
+          git reset --hard
+          git clean -fd
+          git checkout "${IMAGE_TAG}"
 
-            git fetch origin
-            git reset --hard
-            git clean -fd
-            git checkout ${IMAGE_TAG}
+          kubectl create namespace taskflow \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
 
-            echo "Commit:"
-            git rev-parse --short HEAD
+          ECR_PASSWORD=\$(aws ecr get-login-password \
+            --region "${AWS_REGION}")
 
-            echo "=== Helm ==="
-            helm version --short
+          kubectl create secret docker-registry ecr-registry-secret \
+            --docker-server="${{ steps.login-ecr.outputs.registry }}" \
+            --docker-username=AWS \
+            --docker-password="\$ECR_PASSWORD" \
+            -n taskflow \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
 
-            echo "=== Kubernetes ==="
-            kubectl version --client
+          helm upgrade --install taskflow ./taskflow-chart \
+            --namespace taskflow \
+            --set image.repository="${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}" \
+            --set image.tag="${IMAGE_TAG}" \
+            --set image.pullPolicy=Always \
+            --wait \
+            --timeout 180s \
+            --atomic
 
-            echo "=== Namespace ==="
-
-            kubectl create namespace taskflow \
-              --dry-run=client \
-              -o yaml | kubectl apply -f -
-
-            echo "=== ECR Login Secret ==="
-
-            ECR_PASSWORD=\$(aws ecr get-login-password \
-              --region ${AWS_REGION})
-
-            kubectl create secret docker-registry ecr-registry-secret \
-              --docker-server=${{ steps.login-ecr.outputs.registry }} \
-              --docker-username=AWS \
-              --docker-password="\$ECR_PASSWORD" \
-              -n taskflow \
-              --dry-run=client \
-              -o yaml | kubectl apply -f -
-
-            echo "=== Helm Deployment ==="
-
-            helm upgrade --install taskflow ./taskflow-chart \
-              --namespace taskflow \
-              --set image.repository=${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY} \
-              --set image.tag=${IMAGE_TAG} \
-              --set image.pullPolicy=Always \
-              --wait \
-              --timeout 180s \
-              --atomic
-
-            echo "=== Rollout ==="
-
-            kubectl rollout status \
-              deployment/taskflow-taskflow-chart \
-              -n taskflow \
-              --timeout=180s
-
-            echo "=== Deployment Completed ==="
+          kubectl rollout status \
+            deployment/taskflow-taskflow-chart \
+            -n taskflow \
+            --timeout=180s
 
           EOF
-
-      # ---------------------------------------------------------
-      # STEP 3: Verify
-      # ---------------------------------------------------------
-
-      - name: Verify Deployment and Health
-        run: |
-          ssh -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
-
-            set -e
-
-            echo "=== Pods ==="
-            kubectl get pods -n taskflow -o wide
-
-            echo "=== Helm Release ==="
-            helm list -n taskflow
-
-            echo "=== Deployment ==="
-            kubectl get deployment -n taskflow
-
-            echo "=== Service ==="
-            kubectl get service -n taskflow
-
-            echo "=== Application Health ==="
-
-            kubectl run curl-test \
-              -n taskflow \
-              --rm -i \
-              --restart=Never \
-              --image=curlimages/curl \
-              -- curl -fsS \
-              http://taskflow-taskflow-chart:5000/health
-
-            echo
-            echo "=== CD SUCCESS ==="
-
-          EOF
-
