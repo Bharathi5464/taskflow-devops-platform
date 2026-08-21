@@ -179,3 +179,31 @@ secret:
   username: admin
   password: password123
 
+prometheus:
+ enabled: true
+ image:
+   repository: prom/prometheus
+   tag: latest
+   pullPolicy: IfNotPresent
+ replicaCount: 1
+ service:
+   type: ClusterIP
+   port: 9090
+ scrapeInterval: 15s
+ taskflowTargetPort: 5000
+ kubeStateMetrics:
+   enabled: true
+   serviceName: kube-state-metrics
+   port: 8080
+
+grafana:
+  enabled: true
+  image:
+    repository: grafana/grafana
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: NodePort
+    port: 3000
+    targetPort: 3000

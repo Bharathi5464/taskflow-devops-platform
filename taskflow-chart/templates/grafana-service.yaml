@@ -1,0 +1,19 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "taskflow-chart.fullname" . }}-grafana
+  labels:
+    app.kubernetes.io/component: grafana
+    {{- include "taskflow-chart.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.grafana.service.type }}
+  selector:
+    app.kubernetes.io/component: grafana
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.grafana.service.port }}
+      targetPort: {{ .Values.grafana.service.targetPort }}
+      protocol: TCP
+{{- end }}

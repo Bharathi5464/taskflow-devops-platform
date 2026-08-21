@@ -1,0 +1,16 @@
+{{- if .Values.prometheus.kubeStateMetrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.prometheus.kubeStateMetrics.serviceName }}
+  labels:
+    {{- include "taskflow-chart.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.prometheus.kubeStateMetrics.serviceName }}
+  ports:
+    - name: metrics
+      port: {{ .Values.prometheus.kubeStateMetrics.port }}
+      targetPort: 8080
+{{- end }}

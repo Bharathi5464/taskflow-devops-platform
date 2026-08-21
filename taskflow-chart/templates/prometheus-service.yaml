@@ -1,0 +1,18 @@
+{{- if .Values.prometheus.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "taskflow-chart.fullname" . }}-prometheus
+  labels:
+    {{- include "taskflow-chart.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.prometheus.service.type }}
+  selector:
+    app.kubernetes.io/component: prometheus
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.prometheus.service.port }}
+      targetPort: 9090
+      protocol: TCP
+{{- end }}

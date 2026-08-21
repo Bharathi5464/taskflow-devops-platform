@@ -1,0 +1,28 @@
+{{- if .Values.prometheus.kubeStateMetrics.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.prometheus.kubeStateMetrics.serviceName }}
+  labels:
+    app: {{ .Values.prometheus.kubeStateMetrics.serviceName }}
+    {{- include "taskflow-chart.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.prometheus.kubeStateMetrics.serviceName }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.prometheus.kubeStateMetrics.serviceName }}
+    spec:
+      serviceAccountName: {{ .Values.prometheus.kubeStateMetrics.serviceName }}
+      containers:
+        - name: kube-state-metrics
+          image: "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.17.0"
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: telemetry
+              containerPort: 8081
+{{- end }}
