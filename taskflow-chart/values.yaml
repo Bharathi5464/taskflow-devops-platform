@@ -205,8 +205,8 @@ grafana:
   replicaCount: 1
   persistence:
     enabled: true
-    size: 2Gi
-    storageClass: local-path
+    size: 500Mi
+    storageClass: standard
   service:
     type: NodePort
     port: 3000
