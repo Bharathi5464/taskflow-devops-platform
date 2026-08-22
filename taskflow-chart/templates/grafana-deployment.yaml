@@ -26,4 +26,11 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
+          volumeMounts:
+            - name: grafana-storage
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: grafana-storage
+          persistentVolumeClaim:
+            claimName: {{ include "taskflow-chart.fullname" . }}-grafana
 {{- end }}
