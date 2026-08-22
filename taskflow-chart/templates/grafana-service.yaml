@@ -15,5 +15,6 @@ spec:
     - name: http
       port: {{ .Values.grafana.service.port }}
       targetPort: {{ .Values.grafana.service.targetPort }}
+      nodePort: {{ .Values.grafana.service.nodePort }}
       protocol: TCP
 {{- end }}
