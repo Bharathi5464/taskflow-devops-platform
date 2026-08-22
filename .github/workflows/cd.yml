@@ -78,7 +78,6 @@ jobs:
 
           cat > install-helm.sh << 'SCRIPT'
           #!/bin/bash
-
           set -e
 
           if command -v helm >/dev/null 2>&1; then
@@ -119,7 +118,7 @@ jobs:
             "${EC2_USERNAME}@${EC2_HOST}" \
             "command -v helm && helm version --short"
 
-      ## Deploy TaskFlow platform to Kind cluster on EC2
+      # Deploy TaskFlow platform to Kind cluster on EC2
       - name: Deploy to EC2 Kubernetes
         run: |
           EC2_HOST=$(echo "${{ secrets.EC2_HOST }}" | tr -d '[:space:]')
@@ -161,52 +160,6 @@ jobs:
             --dry-run=client \
             -o yaml | kubectl apply -f -
 
-            # Adopt existing monitoring resources into Helm ownership
-            kubectl label serviceaccount kube-state-metrics \
-              app.kubernetes.io/managed-by=Helm \
-              -n taskflow --overwrite
-
-            kubectl annotate serviceaccount kube-state-metrics \
-              meta.helm.sh/release-name=taskflow \
-              meta.helm.sh/release-namespace=taskflow \
-              -n taskflow --overwrite
-
-            kubectl label clusterrole kube-state-metrics \
-              app.kubernetes.io/managed-by=Helm \
-              --overwrite
-
-            kubectl annotate clusterrole kube-state-metrics \
-              meta.helm.sh/release-name=taskflow \
-              meta.helm.sh/release-namespace=taskflow \
-              --overwrite
-
-            kubectl label clusterrolebinding kube-state-metrics \
-              app.kubernetes.io/managed-by=Helm \
-              --overwrite
-
-            kubectl annotate clusterrolebinding kube-state-metrics \
-              meta.helm.sh/release-name=taskflow \
-              meta.helm.sh/release-namespace=taskflow \
-              --overwrite
-
-            kubectl label service kube-state-metrics \
-              app.kubernetes.io/managed-by=Helm \
-              -n taskflow --overwrite
-
-            kubectl annotate service kube-state-metrics \
-              meta.helm.sh/release-name=taskflow \
-              meta.helm.sh/release-namespace=taskflow \
-              -n taskflow --overwrite
-
-            kubectl label deployment kube-state-metrics \
-              app.kubernetes.io/managed-by=Helm \
-              -n taskflow --overwrite
-
-            kubectl annotate deployment kube-state-metrics \
-              meta.helm.sh/release-name=taskflow \
-              meta.helm.sh/release-namespace=taskflow \
-              -n taskflow --overwrite
-
           helm upgrade --install taskflow ./taskflow-chart \
             --namespace taskflow \
             --set image.repository="${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}" \
@@ -221,14 +174,18 @@ jobs:
             -n taskflow \
             --timeout=180s
 
-          kubectl rollout status deployment/taskflow-taskflow-chart-prometheus \
-            -n taskflow \
-            --timeout=180s
-          kubectl rollout status deployment/taskflow-taskflow-chart-grafana \
+          kubectl rollout status \
+            deployment/taskflow-taskflow-chart-prometheus \
             -n taskflow \
             --timeout=180s
 
-          kubectl rollout status deployment/kube-state-metrics \
+          kubectl rollout status \
+            deployment/taskflow-taskflow-chart-grafana \
+            -n taskflow \
+            --timeout=180s
+
+          kubectl rollout status \
+            deployment/kube-state-metrics \
             -n taskflow \
             --timeout=180s
 
